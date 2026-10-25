@@ -21,10 +21,10 @@ logger = logging.getLogger("student-result-api")
 app = FastAPI(title="Student Result Prediction API")
 
 
-# Request logging: request ID, HTTP status and response duration
+# Request logging: request ID, status code, and duration
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     start_time = time.perf_counter()
 
     try:
@@ -53,6 +53,7 @@ async def log_requests(request: Request, call_next):
 
     except Exception:
         duration_ms = (time.perf_counter() - start_time) * 1000
+
         logger.exception(
             "event=http_request_failed request_id=%s "
             "method=%s path=%s duration_ms=%.2f",
@@ -64,7 +65,7 @@ async def log_requests(request: Request, call_next):
         raise
 
 
-# Log invalid request fields without logging the submitted payload
+# Log validation errors without logging submitted payloads
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
     request: Request,
@@ -83,16 +84,19 @@ async def validation_exception_handler(
     )
 
 
-# Demonstration input schema
+# Input schema
 class StudentInput(BaseModel):
     student_id: str = Field(min_length=1)
     marks: float = Field(ge=0, le=100)
 
 
+# Startup logging
 @app.on_event("startup")
 async def startup_event():
     logger.info("event=service_started service=student-result-api")
-    # No model is loaded in this demonstration API.
+    logger.warning(
+        "event=model_not_loaded reason=demonstration_api_only"
+    )
 
 
 @app.get("/")
@@ -108,15 +112,20 @@ async def health():
     return {"status": "healthy"}
 
 
+# Prediction endpoint
 @app.post("/predict")
 async def predict(student: StudentInput):
-    try:
-        logger.info("event=prediction_started")
+    logger.info("event=prediction_request")
 
+    try:
         # Demonstration rule only; NOT a trained ML model.
         result = "PASS" if student.marks >= 40 else "FAIL"
 
-        logger.info("event=prediction_completed result=%s", result)
+        logger.info(
+            "event=prediction_success student_id=%s prediction=%s",
+            student.student_id,
+            result,
+        )
 
         return {
             "student_id": student.student_id,
@@ -126,6 +135,7 @@ async def predict(student: StudentInput):
 
     except Exception:
         logger.exception("event=prediction_failed")
+
         raise HTTPException(
             status_code=500,
             detail="Prediction failed",
